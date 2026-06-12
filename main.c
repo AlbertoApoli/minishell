@@ -4,8 +4,8 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-char *is_executable(char *path_env, char *command_args);
-int run_program(char *program, char *args[]);
+char *is_executable(char *path_env, char *program);
+int run_program(char *argv[]);
 char **string_to_array(char *str);
 
 int main(int argc, char *argv[])
@@ -27,15 +27,12 @@ int main(int argc, char *argv[])
 
         char *path_env = getenv("PATH");
 
-        char *program = input;
-        char *command_args = NULL;
-        char *space = strchr(input, ' ');
+        char **argv = string_to_array(input);
 
-        if (space)
-        {
-            *space = '\0';
-            command_args = space + 1;
-        }
+        if (!argv || !argv[0])
+            continue;
+
+        char *program = argv[0];
 
         if (strcmp(program, "exit") == 0)
         {
@@ -44,14 +41,25 @@ int main(int argc, char *argv[])
 
         if (strcmp(program, "echo") == 0)
         {
-            printf("%s\n", command_args);
+            for (int i = 1; argv[i]; i++)
+            {
+                printf("%s", argv[i]);
+
+                if (argv[i + 1])
+                    printf(" ");
+            }
+
+            printf("\n");
         }
         else if (strcmp(program, "type") == 0)
         {
+            if (!argv[1])
+                continue;
+
             int is_builtin = 0;
             for (int i = 0; i < num_of_builtin; i++)
             {
-                if (strcmp(command_args, builtin[i]) == 0)
+                if (strcmp(argv[1], builtin[i]) == 0)
                 {
                     is_builtin = 1;
                     break;
@@ -59,20 +67,20 @@ int main(int argc, char *argv[])
             }
             if (is_builtin)
             {
-                printf("%s is a shell builtin\n", command_args);
+                printf("%s is a shell builtin\n", argv[1]);
             }
             else
             {
-                char *filepath = is_executable(path_env, command_args);
+                char *filepath = is_executable(path_env, argv[1]);
 
                 if (filepath)
                 {
-                    printf("%s is %s\n", command_args, filepath);
+                    printf("%s is %s\n", argv[1], filepath);
                     free(filepath);
                 }
                 else
                 {
-                    printf("%s: not found\n", command_args);
+                    printf("%s: not found\n", argv[1]);
                 }
             }
         }
@@ -83,23 +91,26 @@ int main(int argc, char *argv[])
         }
         else if (strcmp(program, "cd") == 0)
         {
-            char *path = command_args;
+            if (!argv[1])
+                continue;
 
-            if (strcmp(command_args, "~") == 0)
+            char *path = argv[1];
+
+            if (strcmp(argv[1], "~") == 0)
             {
                 path = getenv("HOME");
             }
 
             if (chdir(path) != 0)
             {
-                printf("cd: %s: No such file or directory\n", command_args);
+                printf("cd: %s: No such file or directory\n", argv[1]);
             }
         }
         else
         {
             if (is_executable(path_env, program))
             {
-                run_program(program, string_to_array(command_args));
+                run_program(argv);
             }
             else
             {
@@ -111,25 +122,8 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-int run_program(char *program, char *args[])
+int run_program(char *argv[])
 {
-    int count = 0;
-
-    if (args)
-    {
-        while (args[count])
-            count++;
-    }
-
-    char **argv = malloc(sizeof(char *) * (count + 2));
-
-    argv[0] = program;
-
-    for (int i = 0; i < count; i++)
-        argv[i + 1] = args[i];
-
-    argv[count + 1] = NULL;
-
     pid_t pid = fork();
 
     if (pid < 0)
@@ -140,7 +134,7 @@ int run_program(char *program, char *args[])
 
     if (pid == 0)
     {
-        execvp(program, argv);
+        execvp(argv[0], argv);
 
         perror("execvp failed");
 
@@ -152,12 +146,11 @@ int run_program(char *program, char *args[])
 
         waitpid(pid, &status, 0);
 
-        free(argv);
-
         return status;
     }
 }
 
+// TODO: Fix memory leak
 char **string_to_array(char *str)
 {
     if (!str)
@@ -175,6 +168,22 @@ char **string_to_array(char *str)
 
     while (token)
     {
+        if (i >= capacity - 1)
+        {
+            capacity *= 2;
+
+            char **tmp = realloc(args, sizeof(char *) * capacity);
+
+            if (!tmp)
+            {
+                free(args);
+                free(str_dup);
+                return NULL;
+            }
+
+            args = tmp;
+        }
+
         args[i] = token;
         i++;
         token = strtok(NULL, " ");
